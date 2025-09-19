@@ -74,38 +74,21 @@ const genAI = new GoogleGenerativeAI(apiKey);
 const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 // Convert PDF to images using poppler (keep for previews)
-async function convertPDFtoImages(pdfPath, outputDir) {
-  try {
-    const data = new Uint8Array(fs.readFileSync(pdfPath));
-    const loadingTask = pdfjs.getDocument({ data });
-    const pdfDocument = await loadingTask.promise;
-    const numPages = pdfDocument.numPages;
-    const imagePaths = [];
+async function convertPDFtoImages(pdfPath) {
+  const data = new Uint8Array(fs.readFileSync(pdfPath));
+  const loadingTask = pdfjs.getDocument({ data });
+  const pdfDocument = await loadingTask.promise;
+  const numPages = pdfDocument.numPages;
+  const textContent = [];
 
-    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-      const page = await pdfDocument.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 1.5 }); // Adjust scale for image quality/resolution
-      const canv = canvas.createCanvas(viewport.width, viewport.height);
-      const ctx = canv.getContext('2d');
-
-      await page.render({
-        canvasContext: ctx,
-        viewport: viewport
-      }).promise;
-
-      const buffer = canv.toBuffer('image/png');
-      const outPath = path.join(outputDir, `page-${pageNum}.png`);
-      fs.writeFileSync(outPath, buffer);
-      imagePaths.push(outPath);
-    }
-
-    return imagePaths.sort();
-  } catch (err) {
-    console.error("PDF to image conversion error:", err.message);
-    return [];
+  for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+    const page = await pdfDocument.getPage(pageNum);
+    const text = await page.getTextContent();
+    textContent.push(text.items.map(item => item.str).join(' '));
   }
-}
 
+  return { textContent }; // Return text instead of images
+}
 // Normalization function for comparison (matching original logic)
 const normalize = (str) => {
   if (!str) return '';
