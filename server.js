@@ -5,18 +5,24 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
-const poppler = require("pdf-poppler");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const canvas = require('canvas'); // New
+const pdfjs = require('pdfjs-dist'); // Already a dep, now used for conversion
 
 const admin = require('firebase-admin');
-const serviceAccount = require('./serviceAccountKey.json'); // Replace with your file name
+
+const serviceAccount = {
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  clientEmail: process.env.FIREBASE_CLIENT_EMAIL
+};
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  storageBucket: 'ldd-backend-910d6.firebasestorage.app' 
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'ldd-backend-910d6.firebasestorage.app'
 });
 
-const bucket = admin.storage().bucket('ldd-backend-910d6.firebasestorage.app');
+const bucket = admin.storage().bucket(process.env.FIREBASE_STORAGE_BUCKET || 'ldd-backend-910d6.firebasestorage.app');
 
 
 
@@ -69,20 +75,31 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 // Convert PDF to images using poppler (keep for previews)
 async function convertPDFtoImages(pdfPath, outputDir) {
-  const opts = {
-    format: "png",
-    out_dir: outputDir,
-    out_prefix: "page",
-    page: null
-  };
-
   try {
-    await poppler.convert(pdfPath, opts);
-    const files = fs.readdirSync(outputDir)
-      .filter(f => f.endsWith(".png"))
-      .map(f => path.join(outputDir, f))
-      .sort();
-    return files;
+    const data = new Uint8Array(fs.readFileSync(pdfPath));
+    const loadingTask = pdfjs.getDocument({ data });
+    const pdfDocument = await loadingTask.promise;
+    const numPages = pdfDocument.numPages;
+    const imagePaths = [];
+
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+      const page = await pdfDocument.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1.5 }); // Adjust scale for image quality/resolution
+      const canv = canvas.createCanvas(viewport.width, viewport.height);
+      const ctx = canv.getContext('2d');
+
+      await page.render({
+        canvasContext: ctx,
+        viewport: viewport
+      }).promise;
+
+      const buffer = canv.toBuffer('image/png');
+      const outPath = path.join(outputDir, `page-${pageNum}.png`);
+      fs.writeFileSync(outPath, buffer);
+      imagePaths.push(outPath);
+    }
+
+    return imagePaths.sort();
   } catch (err) {
     console.error("PDF to image conversion error:", err.message);
     return [];
@@ -381,4 +398,4 @@ app.post("/api/verify-document", async (req, res) => {
 });
 
 
-app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+module.exports = app;
